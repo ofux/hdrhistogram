@@ -327,7 +327,7 @@ func TestSubBucketMaskOverflow(t *testing.T) {
 	}
 }
 
-func TestExportImport(t *testing.T) {
+func TestExportImport16(t *testing.T) {
 	min := int64(1)
 	max := int64(10000000)
 	sigfigs := 3
@@ -336,6 +336,10 @@ func TestExportImport(t *testing.T) {
 		if err := h.RecordValue(int64(i)); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	if h.countsLen >= math.MaxUint16 {
+		t.Fatalf("Histogram countsLen was %v, but expected lower than %v", h.countsLen, math.MaxUint16)
 	}
 
 	s := h.Export()
@@ -355,7 +359,40 @@ func TestExportImport(t *testing.T) {
 	if imported := Import(s); !imported.Equals(h) {
 		t.Error("Expected Histograms to be equivalent")
 	}
+}
 
+func TestExportImport32(t *testing.T) {
+	min := int64(1)
+	max := int64(1000000000)
+	sigfigs := 5
+	h := New(min, max, sigfigs)
+	for i := 0; i < 1000000; i++ {
+		if err := h.RecordValue(int64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if h.countsLen <= math.MaxUint16 {
+		t.Fatalf("Histogram countsLen was %v, but expected higher than %v", h.countsLen, math.MaxUint16)
+	}
+
+	s := h.Export()
+
+	if v := s.LowestTrackableValue; v != min {
+		t.Errorf("LowestTrackableValue was %v, but expected %v", v, min)
+	}
+
+	if v := s.HighestTrackableValue; v != max {
+		t.Errorf("HighestTrackableValue was %v, but expected %v", v, max)
+	}
+
+	if v := int(s.SignificantFigures); v != sigfigs {
+		t.Errorf("SignificantFigures was %v, but expected %v", v, sigfigs)
+	}
+
+	if imported := Import(s); !imported.Equals(h) {
+		t.Error("Expected Histograms to be equivalent")
+	}
 }
 
 func TestEquals(t *testing.T) {

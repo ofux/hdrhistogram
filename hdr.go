@@ -28,11 +28,19 @@ type Snapshot struct {
 	BucketCount                 int32
 	CountsLen                   int32
 	TotalCount                  int64
-	Counts                      []IndexedCount
+	Indexed32Counts             []Indexed32Count
+	Indexed16Counts             []Indexed16Count
 }
 
-type IndexedCount struct {
-	Index int
+// Non-zero counts with their index stored as an uint32
+type Indexed32Count struct {
+	Index uint32
+	Count int64
+}
+
+// Non-zero counts with their index stored as an uint16
+type Indexed16Count struct {
+	Index uint16
 	Count int64
 }
 
@@ -373,13 +381,25 @@ func (h *Histogram) Export() *Snapshot {
 		CountsLen:                   h.countsLen,
 		TotalCount:                  h.totalCount,
 	}
-	var count []IndexedCount
-	for i, c := range h.counts {
-		if c != 0 {
-			count = append(count, IndexedCount{Index: i, Count: c})
+
+	if h.countsLen < math.MaxUint16 {
+		var count []Indexed16Count
+		for i, c := range h.counts {
+			if c != 0 {
+				count = append(count, Indexed16Count{Index: uint16(i), Count: c})
+			}
 		}
+		s.Indexed16Counts = count
+
+	} else {
+		var count []Indexed32Count
+		for i, c := range h.counts {
+			if c != 0 {
+				count = append(count, Indexed32Count{Index: uint32(i), Count: c})
+			}
+		}
+		s.Indexed32Counts = count
 	}
-	s.Counts = count
 	return s
 }
 
@@ -400,8 +420,14 @@ func Import(s *Snapshot) *Histogram {
 		totalCount:                  s.TotalCount,
 	}
 	counts := make([]int64, s.CountsLen)
-	for _, ic := range s.Counts {
-		counts[ic.Index] = ic.Count
+	if s.Indexed16Counts != nil {
+		for _, ic := range s.Indexed16Counts {
+			counts[ic.Index] = ic.Count
+		}
+	} else {
+		for _, ic := range s.Indexed32Counts {
+			counts[ic.Index] = ic.Count
+		}
 	}
 	h.counts = counts
 	return h
