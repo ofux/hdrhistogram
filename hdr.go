@@ -4,7 +4,11 @@
 package hdrhistogram
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/gob"
 	"fmt"
+	"github.com/pkg/errors"
 	"math"
 )
 
@@ -17,6 +21,11 @@ type Bracket struct {
 // A Snapshot is an exported view of a Histogram, useful for serializing them.
 // A Histogram can be constructed from it by passing it to Import.
 type Snapshot struct {
+	CompressedHistogram []byte
+}
+
+// serializableHistogram is a serializable version of Histogram
+type serializableHistogram struct {
 	LowestTrackableValue        int64
 	HighestTrackableValue       int64
 	UnitMagnitude               int64
@@ -28,20 +37,7 @@ type Snapshot struct {
 	BucketCount                 int32
 	CountsLen                   int32
 	TotalCount                  int64
-	Indexed32Counts             []Indexed32Count
-	Indexed16Counts             []Indexed16Count
-}
-
-// Non-zero counts with their index stored as an uint32
-type Indexed32Count struct {
-	Index uint32
-	Count int64
-}
-
-// Non-zero counts with their index stored as an uint16
-type Indexed16Count struct {
-	Index uint16
-	Count int64
+	Counts                      []int64
 }
 
 // A Histogram is a lossy data structure used to record the distribution of
@@ -365,10 +361,18 @@ func (h *Histogram) Equals(other *Histogram) bool {
 	return true
 }
 
+func (h *Histogram) Copy() *Histogram {
+	ch := *h
+	ccounts := make([]int64, len(h.counts))
+	copy(ccounts, h.counts)
+	ch.counts = ccounts
+	return &ch
+}
+
 // Export returns a snapshot view of the Histogram. This can be later passed to
 // Import to construct a new Histogram with the same state.
-func (h *Histogram) Export() *Snapshot {
-	s := &Snapshot{
+func (h *Histogram) Export() (*Snapshot, error) {
+	sh := &serializableHistogram{
 		LowestTrackableValue:        h.lowestTrackableValue,
 		HighestTrackableValue:       h.highestTrackableValue,
 		UnitMagnitude:               h.unitMagnitude,
@@ -380,57 +384,57 @@ func (h *Histogram) Export() *Snapshot {
 		BucketCount:                 h.bucketCount,
 		CountsLen:                   h.countsLen,
 		TotalCount:                  h.totalCount,
+		Counts:                      h.counts,
 	}
 
-	if h.countsLen < math.MaxUint16 {
-		var count []Indexed16Count
-		for i, c := range h.counts {
-			if c != 0 {
-				count = append(count, Indexed16Count{Index: uint16(i), Count: c})
-			}
-		}
-		s.Indexed16Counts = count
-
-	} else {
-		var count []Indexed32Count
-		for i, c := range h.counts {
-			if c != 0 {
-				count = append(count, Indexed32Count{Index: uint32(i), Count: c})
-			}
-		}
-		s.Indexed32Counts = count
+	buf := new(bytes.Buffer)
+	gzipper := gzip.NewWriter(buf)
+	encoder := gob.NewEncoder(gzipper)
+	err := encoder.Encode(sh)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to gob encode histogram")
 	}
-	return s
+	err = gzipper.Close()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to gzip gob encoded histogram")
+	}
+	return &Snapshot{
+		CompressedHistogram: buf.Bytes(),
+	}, nil
 }
 
 // Import returns a new Histogram populated from the Snapshot data (which the
 // caller must stop accessing).
-func Import(s *Snapshot) *Histogram {
-	h := &Histogram{
-		lowestTrackableValue:        s.LowestTrackableValue,
-		highestTrackableValue:       s.HighestTrackableValue,
-		unitMagnitude:               s.UnitMagnitude,
-		significantFigures:          s.SignificantFigures,
-		subBucketHalfCountMagnitude: s.SubBucketHalfCountMagnitude,
-		subBucketHalfCount:          s.SubBucketHalfCount,
-		subBucketMask:               s.SubBucketMask,
-		subBucketCount:              s.SubBucketCount,
-		bucketCount:                 s.BucketCount,
-		countsLen:                   s.CountsLen,
-		totalCount:                  s.TotalCount,
+func Import(s *Snapshot) (*Histogram, error) {
+	fmt.Println(len(s.CompressedHistogram))
+	gzipReader, err := gzip.NewReader(bytes.NewReader(s.CompressedHistogram))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to ungzip gob encoded histogram")
 	}
-	counts := make([]int64, s.CountsLen)
-	if s.Indexed16Counts != nil {
-		for _, ic := range s.Indexed16Counts {
-			counts[ic.Index] = ic.Count
-		}
-	} else {
-		for _, ic := range s.Indexed32Counts {
-			counts[ic.Index] = ic.Count
-		}
+	decoder := gob.NewDecoder(gzipReader)
+	sh := &serializableHistogram{}
+	err = decoder.Decode(sh)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode gob encoded histogram")
 	}
-	h.counts = counts
-	return h
+	err = gzipReader.Close()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to finalize ungzip gob encoded histogram")
+	}
+	return &Histogram{
+		lowestTrackableValue:        sh.LowestTrackableValue,
+		highestTrackableValue:       sh.HighestTrackableValue,
+		unitMagnitude:               sh.UnitMagnitude,
+		significantFigures:          sh.SignificantFigures,
+		subBucketHalfCountMagnitude: sh.SubBucketHalfCountMagnitude,
+		subBucketHalfCount:          sh.SubBucketHalfCount,
+		subBucketMask:               sh.SubBucketMask,
+		subBucketCount:              sh.SubBucketCount,
+		bucketCount:                 sh.BucketCount,
+		countsLen:                   sh.CountsLen,
+		totalCount:                  sh.TotalCount,
+		counts:                      sh.Counts,
+	}, nil
 }
 
 func (h *Histogram) iterator() *iterator {

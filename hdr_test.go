@@ -14,7 +14,10 @@ func TestHighSigFig(t *testing.T) {
 
 	hist := New(459876, 12718782, 5)
 	for _, sample := range input {
-		hist.RecordValue(sample)
+		err := hist.RecordValue(sample)
+		if err != nil {
+			t.Fatalf("unexpected error %s", err)
+		}
 	}
 
 	if v, want := hist.ValueAtQuantile(50), int64(1048575); v != want {
@@ -290,7 +293,7 @@ func BenchmarkHistogramRecordValue(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		h.RecordValue(100)
+		_ = h.RecordValue(100)
 	}
 }
 
@@ -312,7 +315,10 @@ func TestUnitMagnitudeOverflow(t *testing.T) {
 func TestSubBucketMaskOverflow(t *testing.T) {
 	hist := New(2e7, 1e8, 5)
 	for _, sample := range [...]int64{1e8, 2e7, 3e7} {
-		hist.RecordValue(sample)
+		err := hist.RecordValue(sample)
+		if err != nil {
+			t.Fatalf("unexpected error %s", err)
+		}
 	}
 
 	for q, want := range map[float64]int64{
@@ -342,21 +348,16 @@ func TestExportImport16(t *testing.T) {
 		t.Fatalf("Histogram countsLen was %v, but expected lower than %v", h.countsLen, math.MaxUint16)
 	}
 
-	s := h.Export()
-
-	if v := s.LowestTrackableValue; v != min {
-		t.Errorf("LowestTrackableValue was %v, but expected %v", v, min)
+	s, err := h.Export()
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
 	}
 
-	if v := s.HighestTrackableValue; v != max {
-		t.Errorf("HighestTrackableValue was %v, but expected %v", v, max)
+	imported, err := Import(s)
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
 	}
-
-	if v := int(s.SignificantFigures); v != sigfigs {
-		t.Errorf("SignificantFigures was %v, but expected %v", v, sigfigs)
-	}
-
-	if imported := Import(s); !imported.Equals(h) {
+	if !imported.Equals(h) {
 		t.Error("Expected Histograms to be equivalent")
 	}
 }
@@ -376,21 +377,16 @@ func TestExportImport32(t *testing.T) {
 		t.Fatalf("Histogram countsLen was %v, but expected higher than %v", h.countsLen, math.MaxUint16)
 	}
 
-	s := h.Export()
-
-	if v := s.LowestTrackableValue; v != min {
-		t.Errorf("LowestTrackableValue was %v, but expected %v", v, min)
+	s, err := h.Export()
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
 	}
 
-	if v := s.HighestTrackableValue; v != max {
-		t.Errorf("HighestTrackableValue was %v, but expected %v", v, max)
+	imported, err := Import(s)
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
 	}
-
-	if v := int(s.SignificantFigures); v != sigfigs {
-		t.Errorf("SignificantFigures was %v, but expected %v", v, sigfigs)
-	}
-
-	if imported := Import(s); !imported.Equals(h) {
+	if !imported.Equals(h) {
 		t.Error("Expected Histograms to be equivalent")
 	}
 }
