@@ -1,6 +1,7 @@
 package hdrhistogram
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -333,13 +334,33 @@ func TestSubBucketMaskOverflow(t *testing.T) {
 	}
 }
 
+func TestExportImportEmpty(t *testing.T) {
+	min := int64(1)
+	max := int64(10000000)
+	sigfigs := 3
+	h := New(min, max, sigfigs)
+
+	s, err := h.Export()
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
+	}
+
+	imported, err := Import(s)
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
+	}
+	if !imported.Equals(h) {
+		t.Error("Expected Histograms to be equivalent")
+	}
+}
+
 func TestExportImport16(t *testing.T) {
 	min := int64(1)
 	max := int64(10000000)
 	sigfigs := 3
 	h := New(min, max, sigfigs)
-	for i := 0; i < 1000000; i++ {
-		if err := h.RecordValue(int64(i)); err != nil {
+	for i := 0; i < 10000000; i++ {
+		if err := h.RecordValues(int64(i), 100); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -353,6 +374,7 @@ func TestExportImport16(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
+	fmt.Println(len(s.CompressedHistogram))
 	imported, err := Import(s)
 	if err != nil {
 		t.Fatalf("unexpected error %s", err)
@@ -382,6 +404,7 @@ func TestExportImport32(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
+	fmt.Println(len(s.CompressedHistogram))
 	imported, err := Import(s)
 	if err != nil {
 		t.Fatalf("unexpected error %s", err)
