@@ -17,10 +17,23 @@ type Bracket struct {
 // A Snapshot is an exported view of a Histogram, useful for serializing them.
 // A Histogram can be constructed from it by passing it to Import.
 type Snapshot struct {
-	LowestTrackableValue  int64
-	HighestTrackableValue int64
-	SignificantFigures    int64
-	Counts                []int64
+	LowestTrackableValue        int64
+	HighestTrackableValue       int64
+	UnitMagnitude               int64
+	SignificantFigures          int64
+	SubBucketHalfCountMagnitude int32
+	SubBucketHalfCount          int32
+	SubBucketMask               int64
+	SubBucketCount              int32
+	BucketCount                 int32
+	CountsLen                   int32
+	TotalCount                  int64
+	Counts                      []IndexedCount
+}
+
+type IndexedCount struct {
+	Index int
+	Count int64
 }
 
 // A Histogram is a lossy data structure used to record the distribution of
@@ -347,27 +360,50 @@ func (h *Histogram) Equals(other *Histogram) bool {
 // Export returns a snapshot view of the Histogram. This can be later passed to
 // Import to construct a new Histogram with the same state.
 func (h *Histogram) Export() *Snapshot {
-	return &Snapshot{
-		LowestTrackableValue:  h.lowestTrackableValue,
-		HighestTrackableValue: h.highestTrackableValue,
-		SignificantFigures:    h.significantFigures,
-		Counts:                append([]int64(nil), h.counts...), // copy
+	s := &Snapshot{
+		LowestTrackableValue:        h.lowestTrackableValue,
+		HighestTrackableValue:       h.highestTrackableValue,
+		UnitMagnitude:               h.unitMagnitude,
+		SignificantFigures:          h.significantFigures,
+		SubBucketHalfCountMagnitude: h.subBucketHalfCountMagnitude,
+		SubBucketHalfCount:          h.subBucketHalfCount,
+		SubBucketMask:               h.subBucketMask,
+		SubBucketCount:              h.subBucketCount,
+		BucketCount:                 h.bucketCount,
+		CountsLen:                   h.countsLen,
+		TotalCount:                  h.totalCount,
 	}
+	var count []IndexedCount
+	for i, c := range h.counts {
+		if c != 0 {
+			count = append(count, IndexedCount{Index: i, Count: c})
+		}
+	}
+	s.Counts = count
+	return s
 }
 
 // Import returns a new Histogram populated from the Snapshot data (which the
 // caller must stop accessing).
 func Import(s *Snapshot) *Histogram {
-	h := New(s.LowestTrackableValue, s.HighestTrackableValue, int(s.SignificantFigures))
-	h.counts = s.Counts
-	totalCount := int64(0)
-	for i := int32(0); i < h.countsLen; i++ {
-		countAtIndex := h.counts[i]
-		if countAtIndex > 0 {
-			totalCount += countAtIndex
-		}
+	h := &Histogram{
+		lowestTrackableValue:        s.LowestTrackableValue,
+		highestTrackableValue:       s.HighestTrackableValue,
+		unitMagnitude:               s.UnitMagnitude,
+		significantFigures:          s.SignificantFigures,
+		subBucketHalfCountMagnitude: s.SubBucketHalfCountMagnitude,
+		subBucketHalfCount:          s.SubBucketHalfCount,
+		subBucketMask:               s.SubBucketMask,
+		subBucketCount:              s.SubBucketCount,
+		bucketCount:                 s.BucketCount,
+		countsLen:                   s.CountsLen,
+		totalCount:                  s.TotalCount,
 	}
-	h.totalCount = totalCount
+	counts := make([]int64, s.CountsLen)
+	for _, ic := range s.Counts {
+		counts[ic.Index] = ic.Count
+	}
+	h.counts = counts
 	return h
 }
 
