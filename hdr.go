@@ -406,7 +406,6 @@ func (h *Histogram) Export() (*Snapshot, error) {
 // Import returns a new Histogram populated from the Snapshot data (which the
 // caller must stop accessing).
 func Import(s *Snapshot) (*Histogram, error) {
-	fmt.Println(len(s.CompressedHistogram))
 	gzipReader, err := gzip.NewReader(bytes.NewReader(s.CompressedHistogram))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to ungzip gob encoded histogram")
